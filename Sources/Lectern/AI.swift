@@ -34,16 +34,27 @@ enum AIClient {
         }
     }
 
+    /// One turn of a conversation.
+    struct Message {
+        let isUser: Bool
+        let text: String
+    }
+
     static func complete(provider: AIProvider, model: String, system: String, prompt: String) async throws -> String {
+        try await complete(provider: provider, model: model, system: system, messages: [Message(isUser: true, text: prompt)])
+    }
+
+    /// Sends the whole conversation so far, so the AI remembers earlier turns.
+    static func complete(provider: AIProvider, model: String, system: String, messages: [Message]) async throws -> String {
         switch provider {
-        case .gemini: return try await gemini(model: model, system: system, prompt: prompt)
-        case .claude: return try await claude(model: model, system: system, prompt: prompt)
+        case .gemini: return try await gemini(model: model, system: system, messages: messages)
+        case .claude: return try await claude(model: model, system: system, messages: messages)
         }
     }
 
     // MARK: Gemini (Google AI Studio)
 
-    private static func gemini(model: String, system: String, prompt: String) async throws -> String {
+    private static func gemini(model: String, system: String, messages: [Message]) async throws -> String {
         let key = apiKey(for: .gemini)
         guard !key.isEmpty else { throw AIError.noKey(.gemini) }
 
@@ -59,9 +70,12 @@ enum AIClient {
         request.setValue(key, forHTTPHeaderField: "x-goog-api-key")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
+        let contents = messages.map { m -> [String: Any] in
+            ["role": m.isUser ? "user" : "model", "parts": [["text": m.text]]]
+        }
         let body: [String: Any] = [
             "system_instruction": ["parts": [["text": system]]],
-            "contents": [["role": "user", "parts": [["text": prompt]]]],
+            "contents": contents,
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
@@ -94,7 +108,7 @@ enum AIClient {
 
     // MARK: Claude (Anthropic)
 
-    private static func claude(model: String, system: String, prompt: String) async throws -> String {
+    private static func claude(model: String, system: String, messages: [Message]) async throws -> String {
         let key = apiKey(for: .claude)
         guard !key.isEmpty else { throw AIError.noKey(.claude) }
 
@@ -105,11 +119,14 @@ enum AIClient {
         request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
         request.setValue("application/json", forHTTPHeaderField: "content-type")
 
+        let turns = messages.map { m -> [String: Any] in
+            ["role": m.isUser ? "user" : "assistant", "content": m.text]
+        }
         let body: [String: Any] = [
             "model": model,
             "max_tokens": 1500,
             "system": system,
-            "messages": [["role": "user", "content": prompt]],
+            "messages": turns,
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 

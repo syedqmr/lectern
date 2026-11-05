@@ -51,6 +51,11 @@ enum DefaultText {
     Keep it under about 200 words unless they ask for more.
     """
 
+    static let chatPrompt = """
+    You are a helpful, friendly assistant in a chat window next to a teleprompter app. Answer clearly and concisely. \
+    When the user asks you to write something they will read aloud, write it in natural spoken language.
+    """
+
     static let script = """
     ## Opening
     Hi, I'm glad you're here. Today I want to show you something that makes talking to a camera feel a lot more natural.
@@ -79,6 +84,7 @@ final class Preferences: ObservableObject {
     // Scrolling
     @Published var speed: Double { didSet { UserDefaults.standard.set(speed, forKey: "speed") } }
     @Published var voiceFollow: Bool { didSet { UserDefaults.standard.set(voiceFollow, forKey: "voiceFollow") } }
+    @Published var wordTracking: Bool { didSet { UserDefaults.standard.set(wordTracking, forKey: "wordTracking") } }
     @Published var voiceThreshold: Double { didSet { UserDefaults.standard.set(voiceThreshold, forKey: "voiceThreshold") } }
     @Published var pauseOnHover: Bool { didSet { UserDefaults.standard.set(pauseOnHover, forKey: "pauseOnHover") } }
     @Published var countdown: Int { didSet { UserDefaults.standard.set(countdown, forKey: "countdown") } }
@@ -105,9 +111,10 @@ final class Preferences: ObservableObject {
             "overlayVisible": true,
             "speed": 45.0,
             "voiceFollow": true,
+            "wordTracking": false,
             "voiceThreshold": 0.35,
             "pauseOnHover": true,
-            "countdown": 3,
+            "countdown": 0,
             "hideFromCapture": true,
             "provider": AIProvider.gemini.rawValue,
             "geminiModel": "gemini-3.8-flash",
@@ -125,6 +132,7 @@ final class Preferences: ObservableObject {
         overlayVisible = d.bool(forKey: "overlayVisible")
         speed = d.double(forKey: "speed")
         voiceFollow = d.bool(forKey: "voiceFollow")
+        wordTracking = d.bool(forKey: "wordTracking")
         voiceThreshold = d.double(forKey: "voiceThreshold")
         pauseOnHover = d.bool(forKey: "pauseOnHover")
         countdown = d.integer(forKey: "countdown")

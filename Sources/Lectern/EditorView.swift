@@ -1,6 +1,12 @@
 import SwiftUI
 
+private enum EditorTab: Hashable {
+    case script
+    case chat
+}
+
 struct EditorView: View {
+    @State private var tab: EditorTab = .script
     @ObservedObject private var store = ScriptStore.shared
     @ObservedObject private var engine = ScrollEngine.shared
     @ObservedObject private var assistant = Assistant.shared
@@ -14,9 +20,13 @@ struct EditorView: View {
                 .frame(minWidth: 170, idealWidth: 210, maxWidth: 300)
 
             VStack(spacing: 0) {
-                TextEditor(text: $store.text)
-                    .font(.system(size: 15))
-                    .padding(10)
+                if tab == .chat {
+                    ChatView()
+                } else {
+                    TextEditor(text: $store.text)
+                        .font(.system(size: 15))
+                        .padding(10)
+                }
 
                 Divider()
                 controlsBar
@@ -28,6 +38,13 @@ struct EditorView: View {
         .frame(minWidth: 720, minHeight: 440)
         .toolbar {
             ToolbarItemGroup {
+                Picker("View", selection: $tab) {
+                    Text("Script").tag(EditorTab.script)
+                    Text("Chat").tag(EditorTab.chat)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 140)
+
                 Button {
                     overlay.toggle()
                 } label: {

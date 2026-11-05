@@ -11,6 +11,7 @@ final class ScrollEngine: ObservableObject {
     @Published private(set) var countdown: Int? = nil
     @Published var isHovering = false
     @Published private(set) var currentCue = 0
+    @Published private(set) var hud: String? = nil
 
     // Measured by the prompter view.
     var cueTops: [Int: CGFloat] = [:]
@@ -20,6 +21,7 @@ final class ScrollEngine: ObservableObject {
 
     private var timer: Timer?
     private var countdownTimer: Timer?
+    private var hudTimer: Timer?
     private var lastTick = ProcessInfo.processInfo.systemUptime
     private var ramp = 0.0              // eases volume-based scrolling in and out
     private var jumpTarget: Double?
@@ -78,11 +80,22 @@ final class ScrollEngine: ObservableObject {
     func changeSpeed(_ delta: Double) {
         let p = Preferences.shared
         p.speed = min(200, max(10, p.speed + delta))
+        showHUD("Speed \(Int(p.speed))")
     }
 
     func changeFontSize(_ delta: Double) {
         let p = Preferences.shared
         p.fontSize = min(96, max(16, p.fontSize + delta))
+        showHUD("Text size \(Int(p.fontSize))")
+    }
+
+    /// A brief on-screen confirmation, so you can see a shortcut worked.
+    private func showHUD(_ text: String) {
+        hud = text
+        hudTimer?.invalidate()
+        hudTimer = Timer.scheduledTimer(withTimeInterval: 1.2, repeats: false) { [weak self] _ in
+            self?.hud = nil
+        }
     }
 
     /// Manual scroll, e.g. from the trackpad.
@@ -193,7 +206,7 @@ final class ScrollEngine: ObservableObject {
         let hoverPaused = prefs.pauseOnHover && isHovering
 
         // Speech tracking: the prompter goes where your words are, and stays put when you stop.
-        if prefs.voiceFollow && SpeechFollower.shared.isTracking {
+        if prefs.voiceFollow && prefs.wordTracking && SpeechFollower.shared.isTracking {
             ramp = 0
             guard isPlaying, countdown == nil, !hoverPaused, let target = followTarget else { return }
 

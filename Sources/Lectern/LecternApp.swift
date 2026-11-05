@@ -82,11 +82,11 @@ final class AppModel {
 
         // The microphone is only open while the script is actually playing with voice-follow on.
         ScrollEngine.shared.$isPlaying
-            .combineLatest(Preferences.shared.$voiceFollow)
+            .combineLatest(Preferences.shared.$voiceFollow, Preferences.shared.$wordTracking)
             .receive(on: DispatchQueue.main)
-            .sink { playing, follow in
+            .sink { playing, follow, words in
                 let active = playing && follow
-                SpeechFollower.shared.setWanted(active)
+                SpeechFollower.shared.setWanted(active && words)
                 if active {
                     VoiceMonitor.shared.acquire("level")    // volume meter and fallback scrolling
                 } else {
@@ -102,8 +102,10 @@ final class AppModel {
         let engine = ScrollEngine.shared
 
         hk.register(keyCode: kVK_Space, modifiers: mods) { engine.toggle() }
-        hk.register(keyCode: kVK_UpArrow, modifiers: mods) { engine.changeSpeed(5) }
-        hk.register(keyCode: kVK_DownArrow, modifiers: mods) { engine.changeSpeed(-5) }
+        hk.register(keyCode: kVK_UpArrow, modifiers: mods) { engine.changeSpeed(10) }
+        hk.register(keyCode: kVK_DownArrow, modifiers: mods) { engine.changeSpeed(-10) }
+        hk.register(keyCode: kVK_ANSI_RightBracket, modifiers: mods) { engine.changeSpeed(10) }   // ⌃⌥ ]
+        hk.register(keyCode: kVK_ANSI_LeftBracket, modifiers: mods) { engine.changeSpeed(-10) }   // ⌃⌥ [
         hk.register(keyCode: kVK_RightArrow, modifiers: mods) { engine.nextCue() }
         hk.register(keyCode: kVK_LeftArrow, modifiers: mods) { engine.prevCue() }
         hk.register(keyCode: kVK_ANSI_R, modifiers: mods) { engine.restart() }

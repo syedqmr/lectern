@@ -139,26 +139,23 @@ final class Assistant: ObservableObject {
         }
 
         phase = .thinking
-        let prefs = Preferences.shared
-        let provider = prefs.provider
-        let model = provider == .gemini ? prefs.geminiModel : prefs.claudeModel
-        let system = prefs.systemPrompt
-
-        Task {
-            do {
-                let reply = try await AIClient.complete(provider: provider, model: model, system: system, prompt: prompt)
-                DispatchQueue.main.async { self.deliver(reply, for: prompt) }
-            } catch {
+        // Goes through the shared conversation, so the chat tab shows it and the AI remembers it.
+        ChatStore.shared.send(prompt, system: Preferences.shared.systemPrompt) { [weak self] result in
+            switch result {
+            case .success(let reply):
+                self?.phase = .idle
+                self?.present(reply, title: prompt)
+            case .failure(let error):
                 let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-                DispatchQueue.main.async { self.fail(message) }
+                self?.fail(message)
             }
         }
     }
 
-    private func deliver(_ reply: String, for prompt: String) {
+    /// Adds an answer to the script, opens the prompter on it, and starts reading if that is enabled.
+    func present(_ reply: String, title prompt: String) {
         let words = prompt.split(separator: " ").prefix(5).joined(separator: " ")
         ScriptStore.shared.appendCue(title: "AI · \(words)", body: reply)
-        phase = .idle
 
         // Give the prompter a moment to lay out the new cue, then bring it up, park on it, and start.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {

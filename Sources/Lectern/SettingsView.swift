@@ -96,8 +96,8 @@ struct SettingsView: View {
     private var voiceTab: some View {
         Form {
             Section("Scrolling") {
-                Toggle("Follow my words (needs Speech Recognition)", isOn: $prefs.voiceFollow)
-                Text("The prompter listens to what you read, finds the spot in your script, and scrolls to it. It stops when you stop, and dims the words you've said. If speech recognition isn't available it falls back to scrolling while it hears your voice.")
+                Toggle("Scroll while I speak, pause when I stop", isOn: $prefs.voiceFollow)
+                Text("The text moves while the microphone hears your voice and stops when you go quiet. Tune the threshold below if it reacts to background noise or misses your voice.")
                     .font(.caption)
                     .foregroundColor(.secondary)
 
@@ -107,12 +107,16 @@ struct SettingsView: View {
                         Text("\(Int(prefs.speed))").monospacedDigit().frame(width: 32)
                     }
                 }
-                Text("With \"Follow my words\" on, speed is how quickly the text catches up with you. With it off, it's how fast the text scrolls.")
+
+                Toggle("Follow my exact words (experimental)", isOn: $prefs.wordTracking)
+                    .disabled(!prefs.voiceFollow)
+                Text("Matches what you say to the script and scrolls to your place. It needs clear speech recognition and can get stuck if it mishears you, so it's off by default.")
                     .font(.caption)
                     .foregroundColor(.secondary)
 
                 Toggle("Pause while the pointer is over the prompter", isOn: $prefs.pauseOnHover)
-                Stepper("Countdown: \(prefs.countdown) s", value: $prefs.countdown, in: 0...10)
+                Stepper(prefs.countdown == 0 ? "Countdown: off (starts immediately)" : "Countdown: \(prefs.countdown) s",
+                        value: $prefs.countdown, in: 0...10)
             }
 
             Section("Microphone") {
@@ -207,6 +211,7 @@ struct SettingsView: View {
             Section("Global shortcuts (work in any app)") {
                 shortcutRow("Play / pause", "⌃⌥ Space")
                 shortcutRow("Faster / slower", "⌃⌥ ↑  /  ⌃⌥ ↓")
+                shortcutRow("Faster / slower (alternative)", "⌃⌥ ]  /  ⌃⌥ [")
                 shortcutRow("Bigger / smaller text", "⌃⌥ =  /  ⌃⌥ -")
                 shortcutRow("Next / previous cue", "⌃⌥ →  /  ⌃⌥ ←")
                 shortcutRow("Restart from the top", "⌃⌥ R")

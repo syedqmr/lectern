@@ -64,6 +64,13 @@ struct PrompterView: View {
                     .padding(.top, layout.topInset + 6)
             }
         }
+        .overlay {
+            if let text = engine.hud {
+                hudPill(text)
+                    .padding(.top, layout.topInset)
+                    .transition(.opacity)
+            }
+        }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black.opacity(isNotch ? 1 : 0.9))
         .clipShape(panelShape)
@@ -171,7 +178,7 @@ struct PrompterView: View {
         let full = textColor
         let dim = textColor.opacity(0.35)
 
-        guard prefs.voiceFollow, follower.isTracking, follower.position > 0 else {
+        guard prefs.voiceFollow, prefs.wordTracking, follower.isTracking, follower.position > 0 else {
             return Text(cue.body).foregroundColor(full)
         }
 
@@ -214,11 +221,13 @@ struct PrompterView: View {
         switch assistant.phase {
         case .idle:
             guard prefs.voiceFollow, engine.isPlaying, engine.countdown == nil, !engine.isHovering else { return nil }
-            if follower.isTracking {
-                return follower.heardRecently ? nil : "Listening… start reading"
-            }
-            if let problem = follower.problem {
-                return problem + " Scrolling by volume instead."
+            if prefs.wordTracking {
+                if follower.isTracking {
+                    return follower.heardRecently ? nil : "Listening… start reading"
+                }
+                if let problem = follower.problem {
+                    return problem + " Scrolling by volume instead."
+                }
             }
             if voice.permissionDenied {
                 return "Microphone access is off. Enable it in System Settings."
@@ -235,6 +244,17 @@ struct PrompterView: View {
         case .failed(let message):
             return message
         }
+    }
+
+    private func hudPill(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 20, weight: .bold, design: .rounded))
+            .foregroundColor(.white)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(Color.black.opacity(0.8), in: Capsule())
+            .overlay(Capsule().stroke(Color.white.opacity(0.3), lineWidth: 1))
+            .allowsHitTesting(false)
     }
 
     private func statusPill(_ text: String) -> some View {
