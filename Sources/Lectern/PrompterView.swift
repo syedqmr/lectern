@@ -7,6 +7,13 @@ private struct CueTopsKey: PreferenceKey {
     }
 }
 
+private struct BodyFramesKey: PreferenceKey {
+    static var defaultValue: [Int: CGRect] = [:]
+    static func reduce(value: inout [Int: CGRect], nextValue: () -> [Int: CGRect]) {
+        value.merge(nextValue()) { _, new in new }
+    }
+}
+
 private struct ContentHeightKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
@@ -21,6 +28,7 @@ struct PrompterView: View {
     @ObservedObject private var engine = ScrollEngine.shared
     @ObservedObject private var voice = VoiceMonitor.shared
     @ObservedObject private var assistant = Assistant.shared
+    @ObservedObject private var follower = SpeechFollower.shared
     @ObservedObject private var layout = OverlayLayout.shared
 
     private var textColor: Color { Color(hex: prefs.textColorHex) }
@@ -59,6 +67,12 @@ struct PrompterView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black.opacity(isNotch ? 1 : 0.9))
         .clipShape(panelShape)
+        .onChange(of: prefs.fontSize) { _, _ in
+            // Layout settles a moment after the size changes; then re-aim at the current word.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                engine.followPositionChanged()
+            }
+        }
     }
 
     // MARK: Scrolling text
@@ -113,6 +127,12 @@ struct PrompterView: View {
         .onPreferenceChange(CueTopsKey.self) { tops in
             DispatchQueue.main.async { engine.cueTops = tops }
         }
+        .onPreferenceChange(BodyFramesKey.self) { frames in
+            DispatchQueue.main.async {
+                engine.bodyFrames = frames
+                engine.followPositionChanged()
+            }
+        }
         .onPreferenceChange(ContentHeightKey.self) { h in
             DispatchQueue.main.async { engine.contentHeight = Double(h) }
         }
@@ -130,13 +150,42 @@ struct PrompterView: View {
                     .tracking(1.5)
                     .foregroundColor(textColor.opacity(0.45))
             }
-            Text(cue.body)
+            bodyText(cue)
                 .font(.system(size: prefs.fontSize, weight: .semibold))
-                .foregroundColor(textColor)
                 .lineSpacing(prefs.fontSize * 0.25)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
+                .background(
+                    GeometryReader { g in
+                        Color.clear.preference(
+                            key: BodyFramesKey.self,
+                            value: [cue.id: g.frame(in: .named("scroller"))]
+                        )
+                    }
+                )
         }
+    }
+
+    /// The cue's text, with the words you have already said dimmed.
+    private func bodyText(_ cue: Cue) -> Text {
+        let full = textColor
+        let dim = textColor.opacity(0.35)
+
+        guard prefs.voiceFollow, follower.isTracking, follower.position > 0 else {
+            return Text(cue.body).foregroundColor(full)
+        }
+
+        let ns = cue.body as NSString
+        let cut = min(max(follower.spokenOffset(forCue: cue.id, bodyLength: ns.length), 0), ns.length)
+
+        if cut <= 0 {
+            return Text(cue.body).foregroundColor(full)
+        }
+        if cut >= ns.length {
+            return Text(cue.body).foregroundColor(dim)
+        }
+        return Text(ns.substring(to: cut)).foregroundColor(dim)
+            + Text(ns.substring(from: cut)).foregroundColor(full)
     }
 
     // MARK: Overlays
@@ -164,19 +213,25 @@ struct PrompterView: View {
     private var statusText: String? {
         switch assistant.phase {
         case .idle:
-            if prefs.voiceFollow && engine.isPlaying && engine.countdown == nil
-                && voice.isRunning && !voice.speaking && !engine.isHovering {
-                return "Waiting for your voice…"
+            guard prefs.voiceFollow, engine.isPlaying, engine.countdown == nil, !engine.isHovering else { return nil }
+            if follower.isTracking {
+                return follower.heardRecently ? nil : "Listening… start reading"
             }
-            if voice.permissionDenied && prefs.voiceFollow && engine.isPlaying {
+            if let problem = follower.problem {
+                return problem + " Scrolling by volume instead."
+            }
+            if voice.permissionDenied {
                 return "Microphone access is off. Enable it in System Settings."
+            }
+            if voice.isRunning && !voice.speaking {
+                return "Waiting for your voice…"
             }
             return nil
         case .listening:
             let t = assistant.transcript
             return t.isEmpty ? "Listening… tap the mic when you're done" : String(t.suffix(90))
         case .thinking:
-            return "Writing your script…"
+            return "Writing your answer…"
         case .failed(let message):
             return message
         }
@@ -198,19 +253,30 @@ struct PrompterView: View {
     // MARK: Controls (shown while the pointer is over the prompter)
 
     private var controls: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 4) {
             iconButton("backward.end.fill") { engine.prevCue() }
             iconButton(engine.isPlaying || engine.countdown != nil ? "pause.fill" : "play.fill") { engine.toggle() }
             iconButton("forward.end.fill") { engine.nextCue() }
 
             Divider().frame(height: 14)
 
-            iconButton("minus") { engine.changeSpeed(-5) }
+            // Text size
+            iconButton("textformat.size.smaller") { engine.changeFontSize(-2) }
+            Text("\(Int(prefs.fontSize))")
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundColor(.white.opacity(0.8))
+                .frame(minWidth: 22)
+            iconButton("textformat.size.larger") { engine.changeFontSize(2) }
+
+            Divider().frame(height: 14)
+
+            // Speed
+            iconButton("tortoise.fill") { engine.changeSpeed(-5) }
             Text("\(Int(prefs.speed))")
                 .font(.system(size: 11, weight: .medium, design: .monospaced))
                 .foregroundColor(.white.opacity(0.8))
                 .frame(minWidth: 26)
-            iconButton("plus") { engine.changeSpeed(5) }
+            iconButton("hare.fill") { engine.changeSpeed(5) }
 
             Divider().frame(height: 14)
 
@@ -241,7 +307,7 @@ struct PrompterView: View {
             Image(systemName: name)
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(tint)
-                .frame(width: 26, height: 26)
+                .frame(width: 24, height: 26)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

@@ -5,6 +5,8 @@ struct EditorView: View {
     @ObservedObject private var engine = ScrollEngine.shared
     @ObservedObject private var assistant = Assistant.shared
     @ObservedObject private var overlay = OverlayController.shared
+    @ObservedObject private var prefs = Preferences.shared
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         HSplitView {
@@ -16,6 +18,8 @@ struct EditorView: View {
                     .font(.system(size: 15))
                     .padding(10)
 
+                Divider()
+                controlsBar
                 Divider()
                 statusBar
             }
@@ -50,7 +54,14 @@ struct EditorView: View {
                 } label: {
                     Label(micLabel, systemImage: micIcon)
                 }
-                .help("Dictate a prompt or speech. Claude writes a script you can read in the prompter.")
+                .help("Ask a question or dictate notes. The answer appears in the prompter, ready to read.")
+
+                Button {
+                    openSettings()
+                    NSApp.activate(ignoringOtherApps: true)
+                } label: {
+                    Label("Settings", systemImage: "gearshape")
+                }
             }
         }
     }
@@ -98,6 +109,37 @@ struct EditorView: View {
             .buttonStyle(.borderless)
             .padding(8)
         }
+    }
+
+    // MARK: Text size and speed
+
+    private var controlsBar: some View {
+        HStack(spacing: 22) {
+            HStack(spacing: 8) {
+                Image(systemName: "textformat.size")
+                Text("Text size")
+                Slider(value: $prefs.fontSize, in: 16...96, step: 1)
+                    .frame(width: 150)
+                Text("\(Int(prefs.fontSize))")
+                    .monospacedDigit()
+                    .frame(width: 28, alignment: .trailing)
+            }
+
+            HStack(spacing: 8) {
+                Image(systemName: "speedometer")
+                Text("Speed")
+                Slider(value: $prefs.speed, in: 10...200, step: 5)
+                    .frame(width: 150)
+                Text("\(Int(prefs.speed))")
+                    .monospacedDigit()
+                    .frame(width: 32, alignment: .trailing)
+            }
+
+            Spacer()
+        }
+        .font(.callout)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
     }
 
     // MARK: Status bar

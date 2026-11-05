@@ -14,13 +14,41 @@ enum PrompterMode: String, CaseIterable, Identifiable {
     }
 }
 
+enum AIProvider: String, CaseIterable, Identifiable {
+    case gemini
+    case claude
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .gemini: return "Google AI Studio (Gemini)"
+        case .claude: return "Anthropic (Claude)"
+        }
+    }
+
+    var shortName: String {
+        switch self {
+        case .gemini: return "Gemini"
+        case .claude: return "Claude"
+        }
+    }
+
+    var keyName: String {
+        switch self {
+        case .gemini: return "Google AI Studio API key"
+        case .claude: return "Anthropic API key"
+        }
+    }
+}
+
 enum DefaultText {
     static let systemPrompt = """
-    You are a scriptwriter for a teleprompter. The user dictates a prompt, a question, or rough notes. \
-    Reply with text they can read aloud on camera: natural spoken language, short sentences, no markdown, \
-    no bullet points, no headings, no stage directions, and no preamble such as "Sure" or "Here is". \
-    Keep it under about 200 words unless they ask for more. If they dictated rough notes or a draft, \
-    rewrite it as a polished spoken script that keeps their meaning.
+    You write text that will be read aloud from a teleprompter. The user speaks a question, a request, or rough notes. \
+    If it is a question or a request, answer it directly in natural spoken language, as if the user were saying the answer \
+    themselves to an audience. If they give rough notes or a draft, rewrite it as a polished spoken script that keeps their meaning. \
+    Use short sentences. No markdown, no bullet points, no headings, no stage directions, and no preamble such as "Sure" or "Here is". \
+    Keep it under about 200 words unless they ask for more.
     """
 
     static let script = """
@@ -59,7 +87,10 @@ final class Preferences: ObservableObject {
     @Published var hideFromCapture: Bool { didSet { UserDefaults.standard.set(hideFromCapture, forKey: "hideFromCapture") } }
 
     // AI assistant
-    @Published var model: String { didSet { UserDefaults.standard.set(model, forKey: "model") } }
+    @Published var provider: AIProvider { didSet { UserDefaults.standard.set(provider.rawValue, forKey: "provider") } }
+    @Published var geminiModel: String { didSet { UserDefaults.standard.set(geminiModel, forKey: "geminiModel") } }
+    @Published var claudeModel: String { didSet { UserDefaults.standard.set(claudeModel, forKey: "model") } }
+    @Published var autoPlayAnswers: Bool { didSet { UserDefaults.standard.set(autoPlayAnswers, forKey: "autoPlayAnswers") } }
     @Published var systemPrompt: String { didSet { UserDefaults.standard.set(systemPrompt, forKey: "systemPrompt") } }
 
     private init() {
@@ -78,7 +109,10 @@ final class Preferences: ObservableObject {
             "pauseOnHover": true,
             "countdown": 3,
             "hideFromCapture": true,
+            "provider": AIProvider.gemini.rawValue,
+            "geminiModel": "gemini-3.8-flash",
             "model": "claude-sonnet-5-5",
+            "autoPlayAnswers": true,
             "systemPrompt": DefaultText.systemPrompt,
         ])
 
@@ -95,7 +129,10 @@ final class Preferences: ObservableObject {
         pauseOnHover = d.bool(forKey: "pauseOnHover")
         countdown = d.integer(forKey: "countdown")
         hideFromCapture = d.bool(forKey: "hideFromCapture")
-        model = d.string(forKey: "model") ?? "claude-sonnet-5-5"
+        provider = AIProvider(rawValue: d.string(forKey: "provider") ?? "") ?? .gemini
+        geminiModel = d.string(forKey: "geminiModel") ?? "gemini-3.8-flash"
+        claudeModel = d.string(forKey: "model") ?? "claude-sonnet-5-5"
+        autoPlayAnswers = d.bool(forKey: "autoPlayAnswers")
         systemPrompt = d.string(forKey: "systemPrompt") ?? DefaultText.systemPrompt
     }
 }

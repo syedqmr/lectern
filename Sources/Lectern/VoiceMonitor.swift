@@ -2,9 +2,8 @@ import Foundation
 import Combine
 import AVFoundation
 
-/// Listens to the microphone. It measures loudness so the script can scroll while you speak,
-/// and it can hand raw audio buffers to a second consumer (the dictation assistant).
-/// Audio never leaves the Mac from here.
+/// Listens to the microphone. It measures loudness (for the level beam and as a fallback scroll signal)
+/// and hands raw audio buffers to any number of named consumers, such as the speech tracker or the dictation button.
 ///
 /// Several parts of the app may need the mic at once, so callers "acquire" and "release" it by name.
 /// The engine runs only while at least one name holds it.
@@ -21,19 +20,7 @@ final class VoiceMonitor: ObservableObject {
     private var lastLoud = Date.distantPast
 
     private let sinkLock = NSLock()
-    private var _sink: ((AVAudioPCMBuffer) -> Void)?
-
-    /// Receives every audio buffer on the audio thread.
-    var bufferSink: ((AVAudioPCMBuffer) -> Void)? {
-        get {
-            sinkLock.lock(); defer { sinkLock.unlock() }
-            return _sink
-        }
-        set {
-            sinkLock.lock(); defer { sinkLock.unlock() }
-            _sink = newValue
-        }
-    }
+    private var sinks: [String: (AVAudioPCMBuffer) -> Void] = [:]
 
     private init() {
         NotificationCenter.default.addObserver(
@@ -55,6 +42,13 @@ final class VoiceMonitor: ObservableObject {
     func release(_ name: String) {
         holds.remove(name)
         if holds.isEmpty { stopEngine() }
+    }
+
+    /// Registers (or, with nil, removes) a consumer of raw audio buffers. Called on the audio thread.
+    func setSink(_ name: String, _ sink: ((AVAudioPCMBuffer) -> Void)?) {
+        sinkLock.lock()
+        defer { sinkLock.unlock() }
+        sinks[name] = sink
     }
 
     /// Calls back on the main thread.
@@ -117,7 +111,10 @@ final class VoiceMonitor: ObservableObject {
 
     /// Runs on the audio thread.
     private func process(_ buffer: AVAudioPCMBuffer) {
-        bufferSink?(buffer)
+        sinkLock.lock()
+        let consumers = Array(sinks.values)
+        sinkLock.unlock()
+        for consumer in consumers { consumer(buffer) }
 
         guard let channel = buffer.floatChannelData?[0] else { return }
         let count = Int(buffer.frameLength)

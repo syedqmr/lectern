@@ -42,6 +42,7 @@ extension NSScreen {
 enum Keychain {
     static let service = "com.example.lectern"
     static let apiKeyAccount = "anthropic-api-key"
+    static let geminiKeyAccount = "google-ai-studio-api-key"
 
     static func get(_ account: String) -> String? {
         let query: [String: Any] = [

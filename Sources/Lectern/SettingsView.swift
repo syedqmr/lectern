@@ -3,8 +3,10 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject private var prefs = Preferences.shared
     @ObservedObject private var voice = VoiceMonitor.shared
+    @ObservedObject private var follower = SpeechFollower.shared
 
-    @State private var apiKey = ""
+    @State private var geminiKey = ""
+    @State private var claudeKey = ""
     @State private var testingMic = false
 
     var body: some View {
@@ -18,7 +20,7 @@ struct SettingsView: View {
             shortcutsTab
                 .tabItem { Label("Shortcuts", systemImage: "keyboard") }
         }
-        .frame(width: 520, height: 440)
+        .frame(width: 540, height: 520)
         .onDisappear {
             if testingMic {
                 voice.release("settings-test")
@@ -40,7 +42,7 @@ struct SettingsView: View {
 
                 LabeledContent("Text size") {
                     HStack {
-                        Slider(value: $prefs.fontSize, in: 16...72, step: 1)
+                        Slider(value: $prefs.fontSize, in: 16...96, step: 1)
                         Text("\(Int(prefs.fontSize))").monospacedDigit().frame(width: 28)
                     }
                 }
@@ -94,19 +96,27 @@ struct SettingsView: View {
     private var voiceTab: some View {
         Form {
             Section("Scrolling") {
+                Toggle("Follow my words (needs Speech Recognition)", isOn: $prefs.voiceFollow)
+                Text("The prompter listens to what you read, finds the spot in your script, and scrolls to it. It stops when you stop, and dims the words you've said. If speech recognition isn't available it falls back to scrolling while it hears your voice.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
                 LabeledContent("Speed") {
                     HStack {
                         Slider(value: $prefs.speed, in: 10...200, step: 5)
                         Text("\(Int(prefs.speed))").monospacedDigit().frame(width: 32)
                     }
                 }
-                Toggle("Follow my voice (scroll while I speak, pause when I stop)", isOn: $prefs.voiceFollow)
+                Text("With \"Follow my words\" on, speed is how quickly the text catches up with you. With it off, it's how fast the text scrolls.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
                 Toggle("Pause while the pointer is over the prompter", isOn: $prefs.pauseOnHover)
                 Stepper("Countdown: \(prefs.countdown) s", value: $prefs.countdown, in: 0...10)
             }
 
-            Section("Microphone sensitivity") {
-                LabeledContent("Threshold") {
+            Section("Microphone") {
+                LabeledContent("Volume threshold") {
                     Slider(value: $prefs.voiceThreshold, in: 0.1...0.8)
                 }
                 LabeledContent("Level") {
@@ -121,11 +131,16 @@ struct SettingsView: View {
                     }
                     testingMic.toggle()
                 }
-                Text("Speak normally while testing. The bar should turn green when you talk and stay grey in background noise. Headphones help.")
+                Text("The threshold is only used for the volume-based fallback and the level bar. Speak normally while testing; the bar turns green when you talk.")
                     .font(.caption)
                     .foregroundColor(.secondary)
                 if voice.permissionDenied {
                     Text("Microphone access is off. Enable Lectern in System Settings → Privacy & Security → Microphone.")
+                        .font(.caption)
+                        .foregroundColor(.orange)
+                }
+                if let problem = follower.problem {
+                    Text(problem)
                         .font(.caption)
                         .foregroundColor(.orange)
                 }
@@ -138,28 +153,51 @@ struct SettingsView: View {
 
     private var aiTab: some View {
         Form {
-            Section("Anthropic API") {
-                SecureField("API key", text: $apiKey)
-                    .onAppear { apiKey = Keychain.get(Keychain.apiKeyAccount) ?? "" }
-                    .onChange(of: apiKey) { _, newValue in
-                        Keychain.set(newValue, for: Keychain.apiKeyAccount)
+            Section("Answer engine") {
+                Picker("Use", selection: $prefs.provider) {
+                    ForEach(AIProvider.allCases) { provider in
+                        Text(provider.label).tag(provider)
                     }
-                TextField("Model", text: $prefs.model)
-                Text("The key is stored in your macOS Keychain. When you use the mic button, only the text of what you said is sent to the Anthropic API. Audio stays on your Mac.")
+                }
+                Toggle("Start reading an answer as soon as it appears", isOn: $prefs.autoPlayAnswers)
+                Text("Click the mic, ask a question or say some rough notes, click again. The answer is added to your script and shown in the prompter. Only the text of what you said is sent. Your voice never leaves your Mac.")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
 
-            Section("Instructions for Claude") {
+            Section("Google AI Studio (Gemini)") {
+                SecureField("API key", text: $geminiKey)
+                    .onChange(of: geminiKey) { _, newValue in
+                        Keychain.set(newValue, for: Keychain.geminiKeyAccount)
+                    }
+                TextField("Model", text: $prefs.geminiModel)
+                Text("Create a free key at aistudio.google.com/apikey. It is stored in your macOS Keychain.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            Section("Anthropic (Claude)") {
+                SecureField("API key", text: $claudeKey)
+                    .onChange(of: claudeKey) { _, newValue in
+                        Keychain.set(newValue, for: Keychain.apiKeyAccount)
+                    }
+                TextField("Model", text: $prefs.claudeModel)
+            }
+
+            Section("Instructions for the AI") {
                 TextEditor(text: $prefs.systemPrompt)
                     .font(.system(size: 12))
-                    .frame(minHeight: 110)
+                    .frame(minHeight: 100)
                 Button("Reset to default") {
                     prefs.systemPrompt = DefaultText.systemPrompt
                 }
             }
         }
         .formStyle(.grouped)
+        .onAppear {
+            geminiKey = Keychain.get(Keychain.geminiKeyAccount) ?? ""
+            claudeKey = Keychain.get(Keychain.apiKeyAccount) ?? ""
+        }
     }
 
     // MARK: Shortcuts
@@ -169,13 +207,14 @@ struct SettingsView: View {
             Section("Global shortcuts (work in any app)") {
                 shortcutRow("Play / pause", "⌃⌥ Space")
                 shortcutRow("Faster / slower", "⌃⌥ ↑  /  ⌃⌥ ↓")
+                shortcutRow("Bigger / smaller text", "⌃⌥ =  /  ⌃⌥ -")
                 shortcutRow("Next / previous cue", "⌃⌥ →  /  ⌃⌥ ←")
                 shortcutRow("Restart from the top", "⌃⌥ R")
                 shortcutRow("Show / hide prompter", "⌃⌥ P")
-                shortcutRow("Dictate to Claude", "⌃⌥ M")
+                shortcutRow("Mic: ask a question", "⌃⌥ M")
             }
             Section {
-                Text("You can also scroll over the prompter with the trackpad, or hover to pause.")
+                Text("You can also scroll over the prompter with the trackpad, or hover to pause and show the size and speed buttons.")
                     .foregroundColor(.secondary)
             }
         }

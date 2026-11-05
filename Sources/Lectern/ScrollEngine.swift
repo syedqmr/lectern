@@ -1,7 +1,7 @@
 import Foundation
 import SwiftUI
 
-/// Drives the prompter: playback, countdown, easing, cue jumps.
+/// Drives the prompter: playback, countdown, easing, cue jumps, and following your speech.
 /// Everything here runs on the main thread.
 final class ScrollEngine: ObservableObject {
     static let shared = ScrollEngine()
@@ -14,14 +14,16 @@ final class ScrollEngine: ObservableObject {
 
     // Measured by the prompter view.
     var cueTops: [Int: CGFloat] = [:]
+    var bodyFrames: [Int: CGRect] = [:]
     var contentHeight: Double = 0
     var viewportHeight: Double = 0
 
     private var timer: Timer?
     private var countdownTimer: Timer?
     private var lastTick = ProcessInfo.processInfo.systemUptime
-    private var ramp = 0.0              // eases scrolling in and out when the voice starts and stops
+    private var ramp = 0.0              // eases volume-based scrolling in and out
     private var jumpTarget: Double?
+    private var followTarget: Double?   // where the spoken words are, in scroll offset terms
 
     private init() {
         let t = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in self?.tick() }
@@ -48,13 +50,13 @@ final class ScrollEngine: ObservableObject {
     func play() {
         guard !isPlaying, countdown == nil else { return }
         let seconds = Preferences.shared.countdown
-        if seconds > 0 && offset < 1 {
+        if seconds > 0 && offset < 1 && SpeechFollower.shared.position == 0 {
             countdown = seconds
             let t = Timer(timeInterval: 1, repeats: true) { [weak self] t in self?.countdownTick(t) }
             RunLoop.main.add(t, forMode: .common)
             countdownTimer = t
         } else {
-            isPlaying = true
+            startPlaying()
         }
     }
 
@@ -66,9 +68,11 @@ final class ScrollEngine: ObservableObject {
     func restart() {
         pause()
         jumpTarget = nil
+        followTarget = nil
         ramp = 0
         offset = 0
         currentCue = 0
+        SpeechFollower.shared.reset()
     }
 
     func changeSpeed(_ delta: Double) {
@@ -76,9 +80,15 @@ final class ScrollEngine: ObservableObject {
         p.speed = min(200, max(10, p.speed + delta))
     }
 
+    func changeFontSize(_ delta: Double) {
+        let p = Preferences.shared
+        p.fontSize = min(96, max(16, p.fontSize + delta))
+    }
+
     /// Manual scroll, e.g. from the trackpad.
     func nudge(_ delta: Double) {
         jumpTarget = nil
+        followTarget = nil
         offset = min(max(0, offset + delta), maxOffset)
         updateCurrentCue()
     }
@@ -88,6 +98,10 @@ final class ScrollEngine: ObservableObject {
     func jump(toCue index: Int) {
         guard let top = cueTops[index] else { return }
         jumpTarget = min(max(0, Double(top) - 4), maxOffset)
+        let starts = SpeechFollower.shared.index.cueStart
+        if index < starts.count {
+            SpeechFollower.shared.setPosition(starts[index])
+        }
     }
 
     func nextCue() {
@@ -104,7 +118,37 @@ final class ScrollEngine: ObservableObject {
         }
     }
 
+    // MARK: Following speech
+
+    /// Called whenever the spoken position, the layout, or the text size changes.
+    /// Works out which scroll offset puts the next word to be read near the top of the prompter.
+    func followPositionChanged() {
+        let follower = SpeechFollower.shared
+        let words = follower.index.words
+        let cues = ScriptStore.shared.cues
+        guard !words.isEmpty else { return }
+
+        let word = words[min(follower.position, words.count - 1)]
+        guard word.cue < cues.count, let frame = bodyFrames[word.cue] else { return }
+
+        let lineTop = TextProbe.lineTop(
+            cueID: word.cue,
+            body: cues[word.cue].body,
+            range: word.range,
+            fontSize: CGFloat(Preferences.shared.fontSize),
+            width: frame.width
+        )
+        let readingLine = viewportHeight * 0.15
+        let target = Double(frame.minY + lineTop) - readingLine
+        followTarget = min(max(0, target), maxOffset)
+    }
+
     // MARK: Internals
+
+    private func startPlaying() {
+        isPlaying = true
+        followPositionChanged()
+    }
 
     private func cancelCountdown() {
         countdownTimer?.invalidate()
@@ -121,7 +165,7 @@ final class ScrollEngine: ObservableObject {
             t.invalidate()
             countdownTimer = nil
             countdown = nil
-            isPlaying = true
+            startPlaying()
         } else {
             countdown = c - 1
         }
@@ -146,8 +190,38 @@ final class ScrollEngine: ObservableObject {
         }
 
         let prefs = Preferences.shared
+        let hoverPaused = prefs.pauseOnHover && isHovering
+
+        // Speech tracking: the prompter goes where your words are, and stays put when you stop.
+        if prefs.voiceFollow && SpeechFollower.shared.isTracking {
+            ramp = 0
+            guard isPlaying, countdown == nil, !hoverPaused, let target = followTarget else { return }
+
+            // The speed setting decides how quickly the text catches up with your voice.
+            let catchUpRate = 2 + prefs.speed / 15          // 45 -> 5, 200 -> about 15
+            let maxStep = prefs.speed * 10 * dt             // points moved per tick at most
+            let diff = target - offset
+            if abs(diff) < 0.5 {
+                if diff != 0 { offset = target }
+            } else {
+                var step = diff * min(1, dt * catchUpRate)
+                step = max(-maxStep, min(maxStep, step))
+                offset += step
+            }
+            updateCurrentCue()
+
+            let follower = SpeechFollower.shared
+            if !follower.index.words.isEmpty,
+               follower.position >= follower.index.words.count,
+               abs(target - offset) < 1 {
+                pause()                                   // you finished the script
+            }
+            return
+        }
+
+        // Fallback: scroll while the microphone hears you, stop when it doesn't.
         var target = 0.0
-        if isPlaying && countdown == nil && !(prefs.pauseOnHover && isHovering) {
+        if isPlaying && countdown == nil && !hoverPaused {
             target = (!prefs.voiceFollow || VoiceMonitor.shared.speaking) ? 1 : 0
         }
         ramp += (target - ramp) * min(1, dt * 10)
@@ -159,7 +233,7 @@ final class ScrollEngine: ObservableObject {
         let next = offset + prefs.speed * ramp * dt
         if limit > 0 && next >= limit {
             offset = limit
-            pause()                      // reached the end of the script
+            pause()                                       // reached the end of the script
         } else {
             offset = next
         }

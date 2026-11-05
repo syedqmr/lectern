@@ -85,10 +85,12 @@ final class AppModel {
             .combineLatest(Preferences.shared.$voiceFollow)
             .receive(on: DispatchQueue.main)
             .sink { playing, follow in
-                if playing && follow {
-                    VoiceMonitor.shared.acquire("follow")
+                let active = playing && follow
+                SpeechFollower.shared.setWanted(active)
+                if active {
+                    VoiceMonitor.shared.acquire("level")    // volume meter and fallback scrolling
                 } else {
-                    VoiceMonitor.shared.release("follow")
+                    VoiceMonitor.shared.release("level")
                 }
             }
             .store(in: &bag)
@@ -107,5 +109,7 @@ final class AppModel {
         hk.register(keyCode: kVK_ANSI_R, modifiers: mods) { engine.restart() }
         hk.register(keyCode: kVK_ANSI_P, modifiers: mods) { OverlayController.shared.toggle() }
         hk.register(keyCode: kVK_ANSI_M, modifiers: mods) { Assistant.shared.toggle() }
+        hk.register(keyCode: kVK_ANSI_Equal, modifiers: mods) { engine.changeFontSize(2) }
+        hk.register(keyCode: kVK_ANSI_Minus, modifiers: mods) { engine.changeFontSize(-2) }
     }
 }
